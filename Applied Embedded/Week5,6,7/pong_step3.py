@@ -114,15 +114,15 @@ def on_each_frame():
     target_y = ball_y - PADDLE_H / 2             
     # -6 +6 เป็น deadzone
     if   ai_y < target_y - 6:
-        ai_paddle.set_color(game.RED)
+        #ai_paddle.set_color(game.RED)
         ai_y += ai_speed  
         
     elif ai_y > target_y + 6:
-        ai_paddle.set_color(game.RED)
+        #ai_paddle.set_color(game.RED)
         ai_y -= ai_speed  
 
-    else:
-        ai_paddle.set_color(game.GB_LIGHTEST)
+   # else:
+        #ai_paddle.set_color(game.GB_LIGHTEST)
     ai_y = max(0, min(game.HEIGHT - PADDLE_H, ai_y))   # ไม่ให้หลุดจอ
     ai_paddle.move_to(ai_paddle.x, ai_y)
     
