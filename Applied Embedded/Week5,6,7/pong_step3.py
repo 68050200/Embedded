@@ -5,7 +5,7 @@ PADDLE_W, PADDLE_H, BALL_SIZE = 14, 90, 14
 PADDLE_START_Y = game.HEIGHT // 2 - PADDLE_H // 2
 
 ACCEL, MAX_SPEED, FRICTION = 1.5, 12.0, 0.78
-SPEEDUP, BALL_CAP, SPIN = 0.35, 14.0, 0.28
+SPEEDUP, BALL_CAP, SPIN = 0.5, 14.0, 0.28
 SERVE_SPEED = 6.2
 
 # --- ตารางโหมด (mirror ของ s_pong_modes[] ใน C :50-54) ---
@@ -13,7 +13,7 @@ SERVE_SPEED = 6.2
 MODES = [
     ("EASY",   2.2, 0.85, 7),
     ("NORMAL", 3.2, 1.00, 10),
-    ("HARD",   4.6, 1.20, 10),
+    ("HARD",   6, 1.5, 10),
 ]
 
 game.title("PONG")                          # หน้าเริ่ม: Start=เล่น Back=ออก (ทำ start ให้ในตัว)
