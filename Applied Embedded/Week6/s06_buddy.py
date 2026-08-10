@@ -23,8 +23,8 @@ player_paddle = game.Box(20, PADDLE_START_Y, PADDLE_W, PADDLE_H, game.GB_LIGHT)
 ball = game.Box(game.WIDTH // 2, game.HEIGHT // 2, BALL_SIZE, BALL_SIZE, game.GB_LIGHTEST)
 game.Text("Move your paddle: UP / DOWN", 16, 12, game.WHITE)
 
-charge_bar_x, charge_bar_y = 16, 40   # ตำแหน่งหลอด 
-charge_bar_w, charge_bar_h = 120, 10  # ขนาดเต็มของหลอด
+charge_bar_x, charge_bar_y = 16, 40   
+charge_bar_w, charge_bar_h = 120, 10  
 
 charge_bg = game.Box(charge_bar_x, charge_bar_y, charge_bar_w, charge_bar_h, game.GB_DARK)
 charge_fill = game.Box(charge_bar_x, charge_bar_y, 0, charge_bar_h, game.GB_LIGHTEST)
@@ -67,7 +67,7 @@ def on_each_frame():
             ball_vx *= mult
             ball_vy *= mult
         charge = 0 #รีเซ็ต charge กลับเป็น 0 ทุกครั้งที่ ไม่ได้กด a
-    prev_a = keys.a
+    prev_a = keys.a #เช็คว่าก่อนหน้านี้กดอยู่หรือไม่
 
     
     ball_x += ball_vx
@@ -80,7 +80,7 @@ def on_each_frame():
     ball.move_to(ball_x, ball_y)
 
     #หลอดชาร์จ
-    fill_w = max(1, int(charge_bar_w * (charge / charge_max)))
+    fill_w = max(1, int(charge_bar_w * (charge / charge_max))) #ความกว้างหลอด * (ชาร์จไปกี่เปอร์เซ็น / ทั้งหมด)
     charge_fill.resize(fill_w, charge_bar_h)
 
 game.run(on_each_frame, fps=60)
