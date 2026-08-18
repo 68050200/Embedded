@@ -29,6 +29,14 @@ uint8_t clear_bit(uint8_t reg, uint8_t pos) {
     return reg;
 }
 
+int count_ones(uint32_t n) {
+    int count = 0;
+    while (n != 0) {
+        n &= (n - 1); 
+        count++;
+    }
+    return count;
+}
 
 int main(void) {
 
@@ -43,6 +51,7 @@ int main(void) {
     uint8_t reg2 = (clear_bit(0b11111111,5));
     printf("clear_bit(0b00011111,5) = "); print_binary(reg2); printf(" -> %u\n", reg2);
 
+    printf("count_ones(13), count_ones(255), count_ones(1024) : %u %u %u\n", count_ones(13), count_ones(255), count_ones(1024));
     return 0;
 
 }
