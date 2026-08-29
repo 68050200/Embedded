@@ -51,7 +51,7 @@ static float maxTemp(const Reading *arr, int n) {
 
 static void toFahrenheit(Reading *r) { 
     r->temp = r->temp * 9.0f / 5.0f + 32.0f; 
-}
+} 
 
 static void toFahrenheit2(Reading r) 
 {
