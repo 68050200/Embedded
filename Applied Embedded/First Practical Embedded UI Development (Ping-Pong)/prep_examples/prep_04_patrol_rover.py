@@ -160,7 +160,7 @@ def draw_hud():
     state_text.set(STATE_NAME[state])
     zone_label.set("โซนอันตราย")
     if state == STOPPED:
-        status.set("หยุดฉุกเฉิน — กด Z/Space เพื่อปลดล็อก")
+        statu   s.set("หยุดฉุกเฉิน — กด Z/Space เพื่อปลดล็อก")
     else:
         status.set("ตำแหน่ง (%d, %d)" % (rover_x, rover_y))
     counter.set("อยู่ในโซน %d/%d เฟรม | ปลดล็อก %d ครั้ง"
