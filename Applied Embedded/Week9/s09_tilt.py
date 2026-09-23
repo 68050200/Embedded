@@ -33,7 +33,7 @@ while True:
         game.clear()
         break
 
-    # เติม: อ่านความเร่ง 3 แกนด้วย sensors.bmi270.acceleration() -> คืน (ax, ay, az) หน่วย m/s²
+    # เติม: อ่านความเร่ง 3 แกนด้วย se   nsors.bmi270.acceleration() -> คืน (ax, ay, az) หน่วย m/s²
     ax, ay, az = sensors.bmi270.acceleration()
     #ax, ay, az = (0.0, 0.0, 0.0)
     # แปลงเป็น g (วางราบ แกนหนึ่ง ≈ 1.0) — บรรทัดนี้ให้ไว้แล้ว
