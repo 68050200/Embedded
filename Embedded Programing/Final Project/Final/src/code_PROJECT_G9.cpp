@@ -1,5 +1,3 @@
-
-
 /*
 ===================================================================================
 
@@ -15,14 +13,14 @@ GROUP 9 Final Project : ตู้หยอดเหรียญ
 ===================================================================================
 
 
-  1. ใช้ชื่อฟังก์ชันตาม PROJECT_G9.h ตรงตัว
+  1. แก้เฉพาะโซนของตัวเอง ใช้ชื่อฟังก์ชันตาม PROJECT_G9.h ตรงตัว
 
   2. ห้ามใช้ millis() / delay()  ใช้ tick เท่านั้น (1 tick = TICK_MS = 10 ms)
 
   3. เงินทอน/เงินคืน: 1 บาท = LED กะพริบ 1 ครั้ง  -> blinkStart(จำนวนบาท)
   
-  4. tickPending() เรียกครั้งเดียวต่อรอบ loop ถ้าได้ true ให้เดินตัวนับเวลาทุกตัวของโซน 3
-     (E3, E4, E6, กะพริบ) ในฟังก์ชันนั้นเอง
+  4. tickPending() เรียกครั้งเดียวต่อรอบ loop ถ้าได้ true คือมี tick ใหม่ 1 tick (ตัวนับ tickNow() เพิ่ม 1)
+     ฟังก์ชันจับเวลาอื่น (E3, E4, E6, กะพริบ) ให้บันทึก tickNow() ตอนเริ่ม แล้วเทียบเองทุกครั้งที่ถูกเรียก
 
   5. เฟรม UART:  [AA][LEN][SEQ][STATE][BAL_H][BAL_L][PRODUCT][CHK]
      CHK = ผลรวมของ LEN..PRODUCT เก็บ 8 บิต
@@ -31,6 +29,8 @@ GROUP 9 Final Project : ตู้หยอดเหรียญ
   6. เข้า FAULT: คืนเงินที่ค้างอยู่ (ถ้ามี) ด้วยการกะพริบ แล้วค้างที่ FAULT จนกด reset
 
   7. ISR ทำแค่ตั้ง flag/นับ ห้ามพิมพ์ Serial หรือเรียก LCD ใน ISR
+  8. เลือกสินค้าด้วย pot ใน IDLE เท่านั้น (หมุนก่อนหยอด) เมื่อเกิด E1 เหรียญแรก สินค้าถูกล็อก
+     ไม่อ่าน pot อีกจนกลับ IDLE (E2 เทียบกับราคาสินค้าที่ล็อกไว้)
 
  
 
@@ -88,7 +88,7 @@ void timerInit(void)
 bool tickPending(void)
 {
     // ไม่มี tick ใหม่: คืน false
-    // มี tick ใหม่: เดินตัวนับทุกตัว (E3, E4, E6 เมื่อ coinHeld(), จังหวะกะพริบ) แล้วคืน true
+    // มี tick ใหม่: เพิ่มตัวนับ tick (ค่าที่ tickNow() คืน) แล้วคืน true
     return false;
 }
  
@@ -133,6 +133,7 @@ void blinkStart(uint8_t times)
  
 bool blinkDone(void)
 {
+    // ถูกเรียกทุกรอบ loop: ให้สลับ LED ตามเวลาที่ผ่านไป (เทียบ tickNow()) ในฟังก์ชันนี้ด้วย
     // true เมื่อกะพริบครบทุกครั้ง (times = 0 ให้ true ทันที)
     return true;
 }
@@ -160,7 +161,7 @@ void adcInit(void)
  
 uint8_t productIndex(void)
 {
-    // อ่าน POT_PIN เฉลี่ยหลายครั้ง แบ่ง 0–4095 เป็น PRODUCT_COUNT ช่วง
+    // อ่าน POT_PIN เฉลี่ยหลายครั้ง แบ่ง 0–4095 เป็น PRODUCT_COUNT ช่วง (เรียกเฉพาะใน S_IDLE)
     // ใส่ hysteresis ที่ขอบแต่ละช่วงกันค่าสั่น  คืน 0..PRODUCT_COUNT-1
     return 0;
 }
@@ -170,9 +171,10 @@ void lcdInit(void)
     // เริ่ม I2C (I2C_SDA, I2C_SCL, I2C_HZ) และเริ่มจอที่ LCD_ADDR
 }
  
-void showIdle(void)
+void showIdle(uint8_t product)
 {
-    // แสดง "Insert coin"
+    // บรรทัดบน: ชื่อสินค้าชิดซ้าย ราคาชิดขวา (ตาม product ที่ pot ชี้)
+    // บรรทัดล่าง: "Insert coin"
 }
  
 void showCounting(uint8_t product, uint16_t balance)
@@ -225,8 +227,8 @@ void go(State next)
 {
     // log Serial: "[FSM] สถานะเดิม -> สถานะใหม่"
     // เก็บสถานะใหม่ แล้วทำงานตอนเข้าสถานะ:
-    //   S_IDLE           : balance = 0, ledRefundOff(), showIdle()
-    //   S_COUNTING       : idleTimerRestart(), showCounting(...)
+    //   S_IDLE           : balance = 0, ledRefundOff(), showIdle(product)
+    //   S_COUNTING       : ล็อก product ไว้ (ไม่อ่าน pot), idleTimerRestart(), showCounting(...)
     //   S_VEND           : payback = balance - ราคา, stateTimerRestart(), showVending()
     //   S_CHANGE         : showChange(payback), blinkStart(payback)
     //   S_TIMEOUT_REFUND : payback = balance, showRefund(payback), blinkStart(payback)
@@ -234,7 +236,7 @@ void go(State next)
     // ปิดท้าย: sendStatusFrame(state, balance, product)
 }
  
-/* ===== setup / loop  (ชิษณุพงศ์) ==================================== */
+/* ===== setup / loop ==================================== */
  
 void code_ProjectG9_setup(void)
 {
@@ -250,7 +252,7 @@ void code_ProjectG9_setup(void)
 void code_ProjectG9_loop(void)
 {
     // 1. tickPending() ไม่มี tick ให้ออกจากฟังก์ชัน                   [โซน 3]
-    // 2. product = productIndex()                                    [โซน 4]
+    // 2. ถ้า S_IDLE: product = productIndex()  (ใน S_COUNTING ไม่อ่าน pot = ล็อกสินค้า) [โซน 4]
     // 3. รวบรวมเหตุการณ์ตามลำดับความสำคัญ (FAULT ไม่รับ E1/E6):      [โซน 1 เรียกโซน 2, 3]
     //      E7 takeReset()       เฉพาะใน S_FAULT
     //      E6 coinStuck()       ทุกสถานะยกเว้น S_FAULT
@@ -266,6 +268,5 @@ void code_ProjectG9_loop(void)
     //      S_CHANGE         : E5 -> S_IDLE              E6 -> S_FAULT
     //      S_TIMEOUT_REFUND : E5 -> S_IDLE              E6 -> S_FAULT
     //      S_FAULT          : E7 -> S_IDLE
-    // 5. อัปเดตจอเมื่อยอดหรือสินค้าเปลี่ยนใน S_COUNTING              [โซน 1, 4]
+    // 5. อัปเดตจอ: S_IDLE เมื่อสินค้าเปลี่ยน, S_COUNTING เมื่อยอดเปลี่ยน [โซน 1, 4]
 }
- 

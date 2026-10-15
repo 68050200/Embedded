@@ -2,10 +2,10 @@
         GROUP 9 Final Project : ตู้หยอดเหรียญจำลอง (ESP32)
        51423364 การเขียนโปรแกรมสำหรับระบบสมองกลฝังตัว
 
-       1	นายชิษณุพงศ์ วิเชียรกุล	68050200	FSM
-       2	นายกิตติภน ภาษีชา	68050392	ISR ปุ่ม
-       3	นายณัชพล วงศ์ยัง	68050393	hardware timer tick
-       4	นายธีรธน จันทบุตร	68050395	ADC / LCD / UART
+       1	นายชิษณุพงศ์ วิเชียรกุล	68050200
+       2	นายกิตติภน ภาษีชา	68050392
+       3	นายณัชพล วงศ์ยัง	68050393
+       4	นายธีรธน จันทบุตร	68050395
    ------------------------------------------------------------
      ปุ่มเหรียญ GPIO13 (กดสั้น 1 บาท / กดยาว 5 บาท)   ปุ่ม reset GPIO0 (BOOT)
      pot GPIO34 เลือกสินค้า   LED ทอน/คืนเงิน GPIO4   LED FAULT GPIO2
@@ -90,9 +90,9 @@ void     ledRefundOff(void);
 
 /* ---- โซน 4 : ADC / LCD / UART  ---- */
 void     adcInit(void);
-uint8_t  productIndex(void);       /* 0..PRODUCT_COUNT-1 (เฉลี่ยค่า + hysteresis) */
+uint8_t  productIndex(void);       /* 0..PRODUCT_COUNT-1 (เฉลี่ยค่า + hysteresis)  อ่านเฉพาะใน IDLE */
 void     lcdInit(void);
-void     showIdle(void);                                   /* "Insert coin" */
+void     showIdle(uint8_t product);                        /* ชื่อ+ราคาสินค้าที่ pot ชี้ / "Insert coin" */
 void     showCounting(uint8_t product, uint16_t balance);  /* ชื่อ+ราคา / Coin: xB */
 void     showVending(void);                                /* "VENDING..." */
 void     showChange(uint16_t amount);                      /* เงินทอน */
