@@ -12,8 +12,9 @@ GROUP 9 Final Project : ตู้หยอดเหรียญ
 ===================================================================================
   - ห้ามใช้ millis() / delay()  ใช้ tick เท่านั้น (1 tick = TICK_MS = 10 ms)
     (ยกเว้น delayMicroseconds() ใน lcdInit() / คำสั่ง clear ของ LCD ซึ่งเป็นการรอระดับ µs-ms ของตัวจอเอง)
-  - ไม่เรียก buttonInit() / tickInit() / senderBegin() ของ common.cpp
-    เพราะ buttonInit() ผูก ISR ที่ GPIO0 ซ้ำกับ inputInit()
+  - ไม่เรียก tickInit() / senderBegin() ของ common.cpp
+    (ใช้ timerInit() / uartInit() ของโปรเจกต์แทน ; common.cpp ไม่มีโค้ดปุ่มแล้ว
+    ปุ่มทั้งหมดจัดการใน inputInit())
 ===================================================================================
 */
 
@@ -391,7 +392,8 @@ static const char *const STATE_NAME[S_COUNT] = {
 void go(State next)
 {
     State prev = state;
-    Serial.printf("[FSM] %s -> %s\n", STATE_NAME[prev], STATE_NAME[next]);
+    Serial.printf("[%lu ms] [FSM] %s -> %s\n", (unsigned long)(tickNow() * TICK_MS),
+                  STATE_NAME[prev], STATE_NAME[next]);
     state = next;
 
     switch (next) {
@@ -417,12 +419,14 @@ void go(State next)
         break;
 
     case S_CHANGE:
+        stateTimerRestart();                       /* นับเวลาแสดงจออย่างน้อย SHOW_MIN_TICKS */
         showChange(payback);
         blinkStart((uint8_t)payback);
         break;
 
     case S_TIMEOUT_REFUND:
         payback = balance;
+        stateTimerRestart();
         showRefund(payback);
         blinkStart((uint8_t)payback);
         break;
@@ -478,15 +482,18 @@ void code_ProjectG9_loop(void)
     Event ev = EV_NONE;
 
     if (state == S_FAULT) {
-        blinkDone();                               /* ให้การกะพริบคืนเงินเดินต่อใน FAULT */
-        if (rst) ev = EV_RESET;                    /* E7 เฉพาะ FAULT */
+        bool refundDone = blinkDone();             /* ให้การกะพริบคืนเงินเดินต่อใน FAULT */
+        /* E7 : ออกจาก FAULT ได้เมื่อคืนเงินเสร็จ และปล่อยปุ่มเหรียญแล้วเท่านั้น
+           (ถ้ากด BOOT ก่อนหน้านั้นจะถูกทิ้ง ต้องกดใหม่) */
+        if (rst && refundDone && !coinHeld()) ev = EV_RESET;
     } else if (coinStuck()) {
         ev = EV_FAULT;                             /* E6 */
     } else if (state == S_IDLE || state == S_COUNTING) {
         if (coin) {                                /* E1 */
             balance += coin;
             idleTimerRestart();
-            Serial.printf("[E1] coin +%uB balance=%uB\n", (unsigned)coin, (unsigned)balance);
+            Serial.printf("[%lu ms] [E1] coin +%uB balance=%uB\n", (unsigned long)(tickNow() * TICK_MS),
+                          (unsigned)coin, (unsigned)balance);
             ev = (balance >= PRODUCT_PRICE[product]) ? EV_ENOUGH : EV_COIN;   /* E2 ตรวจหลัง E1 เท่านั้น */
         } else if (state == S_COUNTING && idleTimeout()) {
             ev = EV_IDLE_TMO;                      /* E3 */
@@ -494,7 +501,8 @@ void code_ProjectG9_loop(void)
     } else if (state == S_VEND) {
         if (vendDone()) ev = EV_VEND_DONE;         /* E4 */
     } else {                                       /* S_CHANGE / S_TIMEOUT_REFUND */
-        if (blinkDone()) ev = EV_BLINK_DONE;       /* E5 */
+        /* E5 : กะพริบครบ และจอแสดงมาแล้วอย่างน้อย SHOW_MIN_TICKS (1 s) */
+        if (blinkDone() && (tickNow() - stateStart) >= SHOW_MIN_TICKS) ev = EV_BLINK_DONE;
     }
 
     if (ev == EV_NONE) {

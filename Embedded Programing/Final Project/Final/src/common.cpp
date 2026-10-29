@@ -15,7 +15,7 @@
    ------------------------------------------------------------
      bar()            แถบไฟด้วยรีจิสเตอร์ (ครั้งที่ 8–9)
      pwmWrite()       ห่อ LEDC ให้ผ่านทั้ง core 2.x และ 3.x (ครั้งที่ 10)
-     ปุ่ม / tick       interrupt + hardware timer (ครั้งที่ 11–12)
+     tick             hardware timer (ครั้งที่ 12)
      senderFrameTick  "โหนดเซนเซอร์" ที่ส่งเฟรมออกทาง Serial1 (STEP 2)
      sensorSimBegin   "เซนเซอร์อุณหภูมิ I2C" จำลองบน Wire1 (STEP 3–4)
 
@@ -97,65 +97,18 @@ bool takeTick(void)
 
 uint32_t nowMs(void) { return tickSeen * TICK_MS; }
 
-/* ---------------- ปุ่ม BOOT ---------------- */
-#define DEBOUNCE_MS   30
-#define LONG_PRESS_MS 1500
-static volatile uint32_t shortCount = 0, longCount = 0;
-static volatile uint32_t downMs = 0, lastEdgeMs = 0;
-static volatile bool     isDown = false;
-static uint32_t shortSeen = 0, longSeen = 0;
-
-static void IRAM_ATTR onButton(void)
-{
-    uint32_t now = millis();
-    if (now - lastEdgeMs < DEBOUNCE_MS) return;
-    lastEdgeMs = now;
-    bool pressed = ((REG_READ(GPIO_IN_REG) >> BTN_PIN) & 1u) == 0;
-    if (pressed && !isDown) { isDown = true; downMs = now; }
-    else if (!pressed && isDown) {
-        isDown = false;
-        if (now - downMs >= LONG_PRESS_MS) longCount++;
-        else                               shortCount++;
-    }
-}
-
-void buttonInit(void)
-{
-    pinMode(BTN_PIN, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(BTN_PIN), onButton, CHANGE);
-}
-
-bool takeShortPress(void)
-{
-    if (shortCount == shortSeen) return false;
-    shortSeen = shortCount;
-    return true;
-}
-
-bool takeLongPress(void)
-{
-    if (longCount == longSeen) return false;
-    longSeen = longCount;
-    return true;
-}
-
 /* ---------------- ผู้ส่ง (Serial1) ---------------- */
 void senderBegin(uint32_t baud)
 {
     Serial1.begin(baud, SERIAL_8N1, U1_RX, U1_TX);
 }
 
-/* ส่งเฟรม [AA][03][SEQ][RAW_H][RAW_L][CHK] ทุก 200 ms
-   กดปุ่ม BOOT สั้น = เฟรมถัดไปมีไบต์เสีย 1 บิต (จำลองสัญญาณรบกวน)
-   กดค้าง           = เฟรมถัดไปขาดหายไป 1 ไบต์ (จำลองสายหลุดชั่วขณะ) */
+/* ส่งเฟรม [AA][03][SEQ][RAW_H][RAW_L][CHK] ทุก 200 ms */
 void senderFrameTick(void)
 {
     static uint32_t n = 0;
     static uint8_t  seq = 0;
-    static bool     corrupt = false, drop = false;
 
-    if (takeShortPress()) { corrupt = true; Serial.println("   >> (ผู้ส่ง) เฟรมถัดไปจะมีบิตเสีย"); }
-    if (takeLongPress())  { drop = true;    Serial.println("   >> (ผู้ส่ง) เฟรมถัดไปจะขาด 1 ไบต์"); }
     if (++n < 200 / TICK_MS) return;
     n = 0;
 
@@ -168,8 +121,6 @@ void senderFrameTick(void)
     f[4] = (uint8_t)(raw & 0xFF);
     f[5] = (uint8_t)(f[1] + f[2] + f[3] + f[4]);
 
-    if (corrupt) { f[4] ^= 0x04; corrupt = false; }
-    if (drop)    { Serial1.write(f, 3); Serial1.write(f + 4, 2); drop = false; return; }
     Serial1.write(f, sizeof f);
 }
 

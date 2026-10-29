@@ -32,8 +32,7 @@
 #define LCD_ADDR        0x27    /* ตรวจด้วย I2C scan ว่าจอของจริงใช้ 0x27 หรือ 0x3F */
 
 #define U1_TX           26      /* Serial1 ส่งเฟรม */
-#define U1_RX           14      /* ไม่ได้ใช้ */
-#define U2_RX           27      /* ต่อสายจาก 26 */
+#define U1_RX           14      /* ไม่ได้ใช้ (ต้องระบุตอน Serial1.begin) */
 
 /* ==================== เวลา (หน่วย = tick, 1 tick = TICK_MS) ==================== */
 #define TICK_MS          10
@@ -42,6 +41,7 @@
 #define TIMEOUT_TICKS    1000   /* ไม่หยอดเกิน 10 s = E3 */
 #define VEND_TICKS       200    /* เวลาแสดง VENDING...  (ค่าเริ่มต้น 2 s ปรับได้) */
 #define BLINK_TICKS      25     /* ครึ่งคาบการกะพริบ LED ทอน (ค่าเริ่มต้น 250 ms ปรับได้) */
+#define SHOW_MIN_TICKS   100    /* จอ CHANGE / REFUND แสดงอย่างน้อย 1 s ก่อนกลับ IDLE */
 
 /* ==================== สินค้า (4 ช่วงของ pot 0–4095) ==================== */
 /* ชื่อ/ราคา ไม่เกิน 10 ตัวอักษร */
@@ -107,7 +107,6 @@ void     go(State next);           /* เปลี่ยนสถานะ + log
 
 #define LED_BASE     16
 #define LED_COUNT    4
-#define BTN_PIN      RESET_PIN
 #define PWM_PIN      2
 #define SLV_SDA      32
 #define SLV_SCL      33
@@ -120,9 +119,6 @@ void     barInit(void);
 void     bar(uint8_t level);
 void     pwmInit(void);
 void     pwmWrite(uint8_t duty);
-void     buttonInit(void);
-bool     takeShortPress(void);
-bool     takeLongPress(void);
 void     tickInit(void);
 bool     takeTick(void);
 uint32_t nowMs(void);
