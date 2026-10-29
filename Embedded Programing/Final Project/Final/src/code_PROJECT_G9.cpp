@@ -349,7 +349,7 @@ void showRefund(uint16_t amount)
 
 void showFault(void)
 {
-    lcdLine(0, "ERR");
+    lcdLine(0, "System Error");
     lcdLine(1, "Press BOOT");
 #if SHOW_SERIAL
     Serial.println("[LCD] ERR");
