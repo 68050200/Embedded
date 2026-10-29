@@ -32,7 +32,7 @@
 #define LCD_ADDR        0x27    /* ตรวจด้วย I2C scan ว่าจอของจริงใช้ 0x27 หรือ 0x3F */
 
 #define U1_TX           26      /* Serial1 ส่งเฟรม */
-#define U1_RX           14      /* ไม่ได้ใช้ (ต้องระบุตอน Serial1.begin) */
+#define U1_RX           27      /* รับเฟรมที่ส่งวนกลับจาก GPIO26 */
 
 /* ==================== เวลา (หน่วย = tick, 1 tick = TICK_MS) ==================== */
 #define TICK_MS          10
