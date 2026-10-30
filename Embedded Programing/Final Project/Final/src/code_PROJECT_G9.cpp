@@ -28,6 +28,13 @@ GROUP 9 Final Project : ตู้หยอดเหรียญ
 #define ADC_SAMPLES           8
 #define POT_HYST              80     /* hysteresis ที่ขอบแต่ละช่วง (หน่วย ADC count) */
 #define SHOW_SERIAL           1      /* 1 = showXxx พิมพ์ลง Serial ด้วย (ช่วย debug) */
+#define STOCK_INIT            2      /* สต็อกเริ่มต้นของสินค้าทุกชนิด (เติมของ = กดรีสตาร์ทบอร์ด) */
+
+/* log ทุกบรรทัดมีเวลา (ms) นำหน้า  นับจาก tick ของ loop */
+#define LOGT(fmt, ...) Serial.printf("[%lu ms] " fmt "\n", (unsigned long)(tickNow() * TICK_MS), ##__VA_ARGS__)
+
+/* สต็อกสินค้า เก็บใน RAM -> รีสตาร์ทบอร์ดแล้วกลับเป็น STOCK_INIT เอง */
+static uint8_t stock[PRODUCT_COUNT] = { STOCK_INIT, STOCK_INIT, STOCK_INIT, STOCK_INIT };
 
 /* ตัวนับ tick จาก hardware timer (ISR เพิ่มค่า)
    - hwTick   : นับใน ISR  (ใช้วัดความยาวการกดปุ่มใน ISR ได้โดยไม่ต้องเรียกฟังก์ชันนอก IRAM)
@@ -45,6 +52,8 @@ static volatile uint8_t  coinQ[COINQ];
 static volatile uint8_t  qHead = 0, qTail = 0;
 static volatile bool     coinDown = false;
 static volatile uint32_t coinDownTick = 0;
+static volatile bool     faultLatch   = false;   /* ISR เห็นการกดค้าง >= FAULT_TICKS ตอนปล่อย (loop ยังไม่ทันรายงาน) */
+static volatile bool     stuckReported = false;  /* coinStuck() รายงาน FAULT ของการกดครั้งนี้ไปแล้ว */
 
 static volatile uint32_t resetCount = 0, lastResetEdge = 0;
 static uint32_t          resetSeen = 0;
@@ -55,12 +64,15 @@ static void IRAM_ATTR onCoin(void)
     uint32_t now     = hwTick;
 
     if (pressed) {
-        if (!coinDown) { coinDown = true; coinDownTick = now; }
+        if (!coinDown) { coinDown = true; coinDownTick = now; faultLatch = false; stuckReported = false; }
     } else if (coinDown) {
         coinDown = false;
         uint32_t dur = now - coinDownTick;
         if (dur < COIN_DEBOUNCE_TICKS) return;          /* bounce */
-        if (dur >= FAULT_TICKS)        return;          /* กดค้าง = FAULT ไม่นับเป็นเหรียญ */
+        if (dur >= FAULT_TICKS) {                       /* กดค้าง = FAULT ไม่นับเป็นเหรียญ */
+            if (!stuckReported) faultLatch = true;      /* กันกรณีปล่อยก่อน loop ทันเห็น -> ไม่ให้ตกหล่น */
+            return;
+        }
         uint8_t v = (dur >= COIN_LONG_TICKS) ? 5 : 1;
         uint8_t n = (uint8_t)((qHead + 1) % COINQ);
         if (n != qTail) { coinQ[qHead] = v; qHead = n; }
@@ -109,8 +121,6 @@ bool coinHeld(void)
 
 static uint32_t idleStart  = 0;
 static uint32_t stateStart = 0;
-static uint32_t heldSince  = 0;
-static bool     wasHeld    = false;
 
 static uint8_t  blinkLeft  = 0;       /* จำนวนครั้งที่ยังกะพริบไม่ครบ */
 static bool     blinkOn    = false;
@@ -147,11 +157,22 @@ bool idleTimeout(void)
     return (tickNow() - idleStart) >= TIMEOUT_TICKS;
 }
 
+/* E6 : ใช้เกณฑ์เดียวกับ ISR (hwTick - coinDownTick >= FAULT_TICKS) และไม่เก็บสถานะค้างข้ามรอบ
+   - กดค้างจนครบ 3 s ขณะยังกดอยู่  -> true
+   - ปล่อยหลังครบ 3 s ก่อน loop ทันเห็น -> faultLatch ของ ISR ทำให้ true (ไม่ตกหล่นที่ช่วง 3.00-3.03 s) */
 bool coinStuck(void)
 {
-    if (!coinHeld()) { wasHeld = false; return false; }
-    if (!wasHeld)    { wasHeld = true; heldSince = tickNow(); }
-    return (tickNow() - heldSince) >= FAULT_TICKS;
+    if (faultLatch) {
+        faultLatch = false;
+        stuckReported = true;
+        return true;
+    }
+    if (!coinDown || stuckReported) return false;
+    if ((hwTick - coinDownTick) >= FAULT_TICKS) {
+        stuckReported = true;
+        return true;
+    }
+    return false;
 }
 
 void stateTimerRestart(void)
@@ -299,10 +320,11 @@ void lcdInit(void)
 
 void showIdle(uint8_t product)
 {
+    const char *l2 = (stock[product] == 0) ? "Sold out" : "Insert coin";   /* สต็อกหมด = ไม่รับเหรียญ */
     lcdTop(product);
-    lcdLine(1, "Insert coin");
+    lcdLine(1, l2);
 #if SHOW_SERIAL
-    Serial.printf("[LCD] %s %uB | Insert coin\n", PRODUCT_NAME[product], (unsigned)PRODUCT_PRICE[product]);
+    LOGT("[LCD] %s %uB | %s", PRODUCT_NAME[product], (unsigned)PRODUCT_PRICE[product], l2);
 #endif
 }
 
@@ -313,7 +335,7 @@ void showCounting(uint8_t product, uint16_t balance)
     snprintf(buf, sizeof buf, "Coin: %uB", (unsigned)balance);
     lcdLine(1, buf);
 #if SHOW_SERIAL
-    Serial.printf("[LCD] %s %uB | %s\n", PRODUCT_NAME[product], (unsigned)PRODUCT_PRICE[product], buf);
+    LOGT("[LCD] %s %uB | %s", PRODUCT_NAME[product], (unsigned)PRODUCT_PRICE[product], buf);
 #endif
 }
 
@@ -322,7 +344,7 @@ void showVending(void)
     lcdLine(0, "VENDING...");
     lcdLine(1, "");
 #if SHOW_SERIAL
-    Serial.println("[LCD] VENDING...");
+    LOGT("[LCD] VENDING...");
 #endif
 }
 
@@ -333,7 +355,7 @@ void showChange(uint16_t amount)
     lcdLine(0, "Thank you!");
     lcdLine(1, buf);
 #if SHOW_SERIAL
-    Serial.printf("[LCD] %s\n", buf);
+    LOGT("[LCD] %s", buf);
 #endif
 }
 
@@ -344,7 +366,7 @@ void showRefund(uint16_t amount)
     lcdLine(0, "TIMEOUT");
     lcdLine(1, buf);
 #if SHOW_SERIAL
-    Serial.printf("[LCD] %s\n", buf);
+    LOGT("[LCD] %s", buf);
 #endif
 }
 
@@ -353,7 +375,7 @@ void showFault(void)
     lcdLine(0, "System Error");
     lcdLine(1, "Press BOOT");
 #if SHOW_SERIAL
-    Serial.println("[LCD] ERR");
+    LOGT("[LCD] ERR");
 #endif
 }
 
@@ -384,30 +406,48 @@ static uint16_t balance = 0;
 static uint8_t  product = 0;
 static uint16_t payback = 0;
 static uint8_t  shownProduct = 0;               /* สินค้าที่แสดงบนจอใน IDLE ล่าสุด */
+static uint16_t rejectPending = 0;              /* ยอดเหรียญที่ถูก reject (สินค้าหมด) และยังรอกะพริบไฟถอน (1B = 1 ครั้ง) */
 
 static const char *const STATE_NAME[S_COUNT] = {
     "IDLE", "COUNTING", "VEND", "CHANGE", "TIMEOUT_REFUND", "FAULT"
 };
 
+/* IDLE : ให้ไฟถอนกะพริบของเหรียญที่ถูก reject เดินต่อ
+   - รอบเดิมยังกะพริบไม่จบ -> ปล่อยให้จบก่อน (เหรียญใหม่ที่เข้ามาสะสมใน rejectPending)
+   - รอบเดิมจบแล้วและเว้นช่วงดับครบ BLINK_TICKS -> เริ่มรอบใหม่ตามยอดที่สะสม */
+static void idleRejectBlink(void)
+{
+    if (!blinkDone()) return;
+    if (rejectPending == 0) return;
+    if ((tickNow() - blinkLast) < BLINK_TICKS) return;   /* เว้นช่วงดับคั่นระหว่างรอบ */
+
+    uint8_t n = (rejectPending > 255) ? 255 : (uint8_t)rejectPending;
+    rejectPending = 0;
+    blinkStart(n);
+}
+
 void go(State next)
 {
     State prev = state;
-    Serial.printf("[%lu ms] [FSM] %s -> %s\n", (unsigned long)(tickNow() * TICK_MS),
-                  STATE_NAME[prev], STATE_NAME[next]);
+    LOGT("[FSM] %s -> %s", STATE_NAME[prev], STATE_NAME[next]);
     state = next;
 
     switch (next) {
     case S_IDLE:
         balance = 0;
         payback = 0;
+        rejectPending = 0;
         ledRefundOff();
         ledFault(false);
+        product = productIndex();                  /* อ่านสินค้าล่าสุดก่อนโชว์ ไม่ให้จอสลับ 1 tick หลังเข้า IDLE */
         showIdle(product);
         shownProduct = product;
         break;
 
     case S_COUNTING:
         /* product ถูกล็อก: loop ไม่เรียก productIndex() ใน state นี้ */
+        rejectPending = 0;                         /* ตัดกะพริบ reject ที่ค้างจาก IDLE (ถ้ามี) */
+        ledRefundOff();
         idleTimerRestart();
         showCounting(product, balance);
         break;
@@ -420,6 +460,9 @@ void go(State next)
 
     case S_CHANGE:
         stateTimerRestart();                       /* นับเวลาแสดงจออย่างน้อย SHOW_MIN_TICKS */
+        LOGT("[MONEY] paid=%uB = price %uB + change %uB  (%s)", (unsigned)balance,
+             (unsigned)PRODUCT_PRICE[product], (unsigned)payback,
+             (balance == PRODUCT_PRICE[product] + payback) ? "OK" : "MISMATCH");
         showChange(payback);
         blinkStart((uint8_t)payback);
         break;
@@ -427,22 +470,25 @@ void go(State next)
     case S_TIMEOUT_REFUND:
         payback = balance;
         stateTimerRestart();
+        LOGT("[MONEY] paid=%uB refund=%uB  (%s)", (unsigned)balance, (unsigned)payback,
+             (balance == payback) ? "OK" : "MISMATCH");
         showRefund(payback);
         blinkStart((uint8_t)payback);
         break;
 
     case S_FAULT:
         ledFault(true);
-        /* คืนเงินที่ค้าง (กฎข้อ 6)
-           - มาจาก COUNTING : คืนยอดที่หยอดทั้งหมด
-           - มาจาก VEND     : คืนส่วนทอน (payback คำนวณไว้แล้ว)
-           - มาจาก CHANGE / TIMEOUT_REFUND : กะพริบค้างอยู่แล้ว ปล่อยให้ทำต่อ (loop เรียก blinkDone() ใน FAULT) */
+        rejectPending = 0;
+        if (prev == S_IDLE) ledRefundOff();        /* กันไฟกะพริบจากการ reject ค้างตอนเข้า FAULT */
+
         if (prev == S_COUNTING) {
             payback = balance;
             blinkStart((uint8_t)payback);
         } else if (prev == S_VEND) {
             blinkStart((uint8_t)payback);
         }
+        LOGT("[MONEY] fault from %s: paid=%uB refund=%uB", STATE_NAME[prev],
+             (unsigned)balance, (unsigned)payback);
         showFault();
         break;
 
@@ -481,29 +527,52 @@ void code_ProjectG9_loop(void)
 
     Event ev = EV_NONE;
 
+    /* log เหตุการณ์ที่ถูกทิ้ง (เหรียญ/BOOT ที่มาในสถานะที่ไม่รับ) เพื่อให้ตามใน log ได้ครบ */
+    if (coin && state != S_IDLE && state != S_COUNTING)
+        LOGT("[E1] coin +%uB DROPPED in %s", (unsigned)coin, STATE_NAME[state]);
+    if (rst && state != S_FAULT)
+        LOGT("[E7] BOOT ignored in %s", STATE_NAME[state]);
+
     if (state == S_FAULT) {
         bool refundDone = blinkDone();             /* ให้การกะพริบคืนเงินเดินต่อใน FAULT */
         /* E7 : ออกจาก FAULT ได้เมื่อคืนเงินเสร็จ และปล่อยปุ่มเหรียญแล้วเท่านั้น
            (ถ้ากด BOOT ก่อนหน้านั้นจะถูกทิ้ง ต้องกดใหม่) */
-        if (rst && refundDone && !coinHeld()) ev = EV_RESET;
+        if (coin) LOGT("[E1] coin +%uB DROPPED in FAULT", (unsigned)coin);
+        if (rst) {
+            if (refundDone && !coinHeld()) { ev = EV_RESET; LOGT("[E7] BOOT accepted"); }
+            else LOGT("[E7] BOOT ignored in FAULT (%s)", refundDone ? "coin button still held" : "refund blinking");
+        }
     } else if (coinStuck()) {
         ev = EV_FAULT;                             /* E6 */
+        LOGT("[E6] coin button held >= %u ms -> FAULT", (unsigned)(FAULT_TICKS * TICK_MS));
     } else if (state == S_IDLE || state == S_COUNTING) {
-        if (coin) {                                /* E1 */
+        if (coin && state == S_IDLE && stock[product] == 0) {
+            /* สินค้าที่เลือกหมด : ไม่รับเหรียญ ยอดไม่เปลี่ยน แต่ให้ไฟถอนกะพริบตามมูลค่าเหรียญ (1B = 1 ครั้ง) */
+            rejectPending += coin;
+            LOGT("[E1] coin +%uB REJECTED: %s sold out -> refund blink x%u", (unsigned)coin,
+                 PRODUCT_NAME[product], (unsigned)rejectPending);
+        } else if (coin) {                         /* E1 */
             balance += coin;
             idleTimerRestart();
-            Serial.printf("[%lu ms] [E1] coin +%uB balance=%uB\n", (unsigned long)(tickNow() * TICK_MS),
-                          (unsigned)coin, (unsigned)balance);
+            LOGT("[E1] coin +%uB balance=%uB", (unsigned)coin, (unsigned)balance);
             ev = (balance >= PRODUCT_PRICE[product]) ? EV_ENOUGH : EV_COIN;   /* E2 ตรวจหลัง E1 เท่านั้น */
+            if (ev == EV_ENOUGH) LOGT("[E2] balance %uB >= price %uB", (unsigned)balance, (unsigned)PRODUCT_PRICE[product]);
         } else if (state == S_COUNTING && idleTimeout()) {
             ev = EV_IDLE_TMO;                      /* E3 */
+            LOGT("[E3] no coin for %u ms -> refund %uB", (unsigned)(TIMEOUT_TICKS * TICK_MS), (unsigned)balance);
         }
     } else if (state == S_VEND) {
-        if (vendDone()) ev = EV_VEND_DONE;         /* E4 */
+        if (vendDone()) { ev = EV_VEND_DONE; LOGT("[E4] vend done"); }   /* E4 */
     } else {                                       /* S_CHANGE / S_TIMEOUT_REFUND */
         /* E5 : กะพริบครบ และจอแสดงมาแล้วอย่างน้อย SHOW_MIN_TICKS (1 s) */
-        if (blinkDone() && (tickNow() - stateStart) >= SHOW_MIN_TICKS) ev = EV_BLINK_DONE;
+        if (blinkDone() && (tickNow() - stateStart) >= SHOW_MIN_TICKS) {
+            ev = EV_BLINK_DONE;
+            LOGT("[E5] blink done");
+        }
     }
+
+    /* IDLE ไม่มีเหตุการณ์ : ให้ไฟถอนของเหรียญที่ถูก reject กะพริบต่อ */
+    if (state == S_IDLE && ev == EV_NONE) idleRejectBlink();
 
     if (ev == EV_NONE) {
         /* ไม่มีเหตุการณ์: อัปเดตจอเฉพาะเมื่อสินค้าที่ pot ชี้เปลี่ยน (IDLE) */
@@ -536,7 +605,13 @@ void code_ProjectG9_loop(void)
 
     case S_VEND:
         if (ev == EV_FAULT)          go(S_FAULT);
-        else if (ev == EV_VEND_DONE) go(S_CHANGE);
+        else if (ev == EV_VEND_DONE) {
+            /* ลดสต็อกเมื่อจ่ายของเสร็จจริงเท่านั้น (ถ้า FAULT ระหว่าง VEND จะไม่ถึงบรรทัดนี้) */
+            if (stock[product] > 0) stock[product]--;
+            LOGT("[STOCK] %s left=%u%s", PRODUCT_NAME[product], (unsigned)stock[product],
+                 stock[product] == 0 ? " (SOLD OUT)" : "");
+            go(S_CHANGE);
+        }
         break;
 
     case S_CHANGE:
